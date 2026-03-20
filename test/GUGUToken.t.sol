@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Test, console} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {GUGUToken} from "../src/GUGUToken.sol";
 
 contract GUGUTokenTest is Test {
@@ -9,7 +9,6 @@ contract GUGUTokenTest is Test {
     address public owner = address(this);
     address public alice = makeAddr("alice");
     address public bob = makeAddr("bob");
-    address public minter = makeAddr("minter");
 
     uint256 public constant INITIAL_SUPPLY = 10_000_000 * 1e18;
 
@@ -32,38 +31,26 @@ contract GUGUTokenTest is Test {
         assertEq(token.balanceOf(owner), INITIAL_SUPPLY);
     }
 
-    // ── Minter 管理 ──
-
-    function test_AddMinter() public {
-        token.addMinter(minter);
-        assertTrue(token.minters(minter));
+    function test_MaxSupply() public view {
+        assertEq(token.MAX_SUPPLY(), 100_000_000 * 1e18);
     }
 
-    function test_RemoveMinter() public {
-        token.addMinter(minter);
-        token.removeMinter(minter);
-        assertFalse(token.minters(minter));
-    }
+    // ── 铸造 (Owner Only) ──
 
-    function test_RevertAddMinterNotOwner() public {
-        vm.prank(alice);
-        vm.expectRevert();
-        token.addMinter(minter);
-    }
-
-    // ── 铸造 ──
-
-    function test_MinterCanMint() public {
-        token.addMinter(minter);
-        vm.prank(minter);
+    function test_OwnerCanMint() public {
         token.mint(alice, 1000 * 1e18);
         assertEq(token.balanceOf(alice), 1000 * 1e18);
     }
 
-    function test_RevertMintNotMinter() public {
+    function test_RevertMintNotOwner() public {
         vm.prank(alice);
         vm.expectRevert();
         token.mint(alice, 1000);
+    }
+
+    function test_RevertMintExceedsMaxSupply() public {
+        vm.expectRevert();
+        token.mint(alice, 100_000_000 * 1e18); // 已有 10M, 再铸 100M 会超限
     }
 
     // ── 销毁 ──
@@ -80,5 +67,38 @@ contract GUGUTokenTest is Test {
         token.approve(owner, 500 * 1e18);
         token.burnFrom(alice, 500 * 1e18);
         assertEq(token.balanceOf(alice), 500 * 1e18);
+    }
+
+    // ── 黑名单 ──
+
+    function test_AddBlacklist() public {
+        token.addBlacklist(alice);
+        assertTrue(token.blacklisted(alice));
+    }
+
+    function test_RemoveBlacklist() public {
+        token.addBlacklist(alice);
+        token.removeBlacklist(alice);
+        assertFalse(token.blacklisted(alice));
+    }
+
+    function test_RevertTransferFromBlacklisted() public {
+        token.transfer(alice, 1000 * 1e18);
+        token.addBlacklist(alice);
+        vm.prank(alice);
+        vm.expectRevert();
+        token.transfer(bob, 100 * 1e18);
+    }
+
+    function test_RevertTransferToBlacklisted() public {
+        token.addBlacklist(bob);
+        vm.expectRevert();
+        token.transfer(bob, 100 * 1e18);
+    }
+
+    function test_RevertBlacklistNotOwner() public {
+        vm.prank(alice);
+        vm.expectRevert();
+        token.addBlacklist(bob);
     }
 }

@@ -9,7 +9,7 @@ import {GUGUToken} from "./GUGUToken.sol";
 
 /**
  * @title NFTStaking
- * @notice 质押 GUGUNFT 获取 GUGUToken 奖励
+ * @notice 质押 GUGUNFT 获取 GUGUToken 奖励（从合约预充值的 Token 池中发放）
  *         - Founder: 50 GUGU/天
  *         - Pro:     15 GUGU/天
  *         - Basic:    3 GUGU/天
@@ -119,7 +119,7 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
 
         // 再发放奖励
         if (reward > 0) {
-            guguToken.mint(msg.sender, reward);
+            guguToken.transfer(msg.sender, reward);
         }
 
         emit Unstaked(msg.sender, tokenId, reward);
@@ -143,7 +143,7 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
         }
 
         if (totalReward > 0) {
-            guguToken.mint(msg.sender, totalReward);
+            guguToken.transfer(msg.sender, totalReward);
         }
     }
 
@@ -163,7 +163,7 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
         }
 
         if (totalReward > 0) {
-            guguToken.mint(msg.sender, totalReward);
+            guguToken.transfer(msg.sender, totalReward);
         }
 
         emit RewardsClaimed(msg.sender, totalReward);

@@ -103,6 +103,21 @@ contract GUGUNFT is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentra
         return tokenId;
     }
 
+    /// @notice 授权 Minter 批量铸造（同一稀有度，同一地址）
+    /// @param to       接收地址
+    /// @param rarity   稀有度
+    /// @param quantity 数量（最多 50）
+    function mintBatch(address to, Rarity rarity, uint256 quantity) external onlyMinter {
+        require(quantity > 0 && quantity <= 50, "Invalid quantity");
+        for (uint256 i = 0; i < quantity; i++) {
+            if (totalSupplyByRarity[rarity] >= maxSupplyByRarity[rarity]) {
+                revert ExceedsMaxSupply(rarity);
+            }
+            uint256 tokenId = _mintInternal(to, rarity);
+            emit NFTMinted(to, tokenId, rarity);
+        }
+    }
+
     // ═══════════════════════════════════════════
     //              Minter 管理
     // ═══════════════════════════════════════════

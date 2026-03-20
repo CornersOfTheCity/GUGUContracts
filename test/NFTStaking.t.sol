@@ -19,8 +19,8 @@ contract NFTStakingTest is Test {
         nft = new GUGUNFT();
         staking = new NFTStaking(address(token), address(nft));
 
-        // 授权 Staking 合约铸造 Token
-        token.addMinter(address(staking));
+        // 预充值 Staking 合约的 Token 奖励池
+        token.transfer(address(staking), 1_000_000 * 1e18);
 
         // 给 alice 铸造一些 NFT
         nft.addMinter(address(this));
