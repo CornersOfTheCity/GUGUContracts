@@ -8,22 +8,22 @@ import {GUGUNFT} from "./GUGUNFT.sol";
 
 /**
  * @title Airdrop
- * @notice 批量空投合约 — 支持 ERC-20 Token 和 ERC-721 NFT 的批量发放
+ * @notice Batch airdrop contract — supports batch distribution of ERC-20 tokens and ERC-721 NFTs
  *
- *         功能:
- *         1) airdropToken: 批量空投 ERC-20 代币（等额 或 自定义金额）
- *         2) airdropNFT:   批量铸造 NFT 给指定地址列表（需 GUGUNFT Minter 权限）
+ *         Features:
+ *         1) airdropToken: Batch airdrop ERC-20 tokens (equal or custom amounts)
+ *         2) airdropNFT:   Batch mint NFTs to specified address list (requires GUGUNFT Minter role)
  *
- *         使用前:
- *         - Token 空投: Owner 需先 approve 足够的 Token 给本合约
- *         - NFT 空投:   需在 GUGUNFT 合约中将本合约 addMinter
+ *         Prerequisites:
+ *         - Token airdrop: Owner must first approve sufficient tokens to this contract
+ *         - NFT airdrop:   This contract must be added as a minter in the GUGUNFT contract
  */
 contract Airdrop is Ownable {
     using SafeERC20 for IERC20;
 
     GUGUNFT public immutable guguNFT;
 
-    /// @notice 单次空投最大地址数，防止 gas 超限
+    /// @notice Maximum recipients per airdrop to prevent gas limit issues
     uint256 public constant MAX_BATCH_SIZE = 200;
 
     // ── Events ──
@@ -35,18 +35,18 @@ contract Airdrop is Ownable {
     error ArrayLengthMismatch();
     error ExceedsMaxBatchSize(uint256 size);
 
-    constructor(address _guguNFT) Ownable(msg.sender) {
+    constructor(address initialOwner, address _guguNFT) Ownable(initialOwner) {
         guguNFT = GUGUNFT(_guguNFT);
     }
 
     // ═══════════════════════════════════════════
-    //         ERC-20 Token 批量空投
+    //         ERC-20 Token Batch Airdrop
     // ═══════════════════════════════════════════
 
-    /// @notice 等额空投 — 给每个地址发放相同数量的 Token
-    /// @param token     ERC-20 代币地址
-    /// @param recipients 接收地址列表
-    /// @param amountEach 每人获得的数量 (含精度, 如 100 * 1e18)
+    /// @notice Equal airdrop — distribute the same amount of tokens to each address
+    /// @param token      ERC-20 token address
+    /// @param recipients List of recipient addresses
+    /// @param amountEach Amount each recipient receives (with decimals, e.g. 100 * 1e18)
     function airdropTokenEqual(
         address token,
         address[] calldata recipients,
@@ -58,7 +58,7 @@ contract Airdrop is Ownable {
 
         uint256 totalAmount = amountEach * len;
 
-        // 从 Owner 转入合约，再分发
+        // Transfer from owner to contract, then distribute
         IERC20(token).safeTransferFrom(msg.sender, address(this), totalAmount);
 
         for (uint256 i = 0; i < len; i++) {
@@ -68,10 +68,10 @@ contract Airdrop is Ownable {
         emit TokenAirdropped(token, len, totalAmount);
     }
 
-    /// @notice 自定义金额空投 — 每个地址发放不同数量
-    /// @param token      ERC-20 代币地址
-    /// @param recipients 接收地址列表
-    /// @param amounts    每人获得的数量列表 (与 recipients 等长)
+    /// @notice Custom amount airdrop — distribute different amounts to each address
+    /// @param token      ERC-20 token address
+    /// @param recipients List of recipient addresses
+    /// @param amounts    Amount for each recipient (must match recipients length)
     function airdropTokenCustom(
         address token,
         address[] calldata recipients,
@@ -87,7 +87,7 @@ contract Airdrop is Ownable {
             totalAmount += amounts[i];
         }
 
-        // 从 Owner 转入合约，再分发
+        // Transfer from owner to contract, then distribute
         IERC20(token).safeTransferFrom(msg.sender, address(this), totalAmount);
 
         for (uint256 i = 0; i < len; i++) {
@@ -98,12 +98,12 @@ contract Airdrop is Ownable {
     }
 
     // ═══════════════════════════════════════════
-    //         ERC-721 NFT 批量空投
+    //         ERC-721 NFT Batch Airdrop
     // ═══════════════════════════════════════════
 
-    /// @notice 批量铸造 NFT 给地址列表（所有人获得相同稀有度）
-    /// @param recipients 接收地址列表
-    /// @param rarity     NFT 稀有度 (0=Founder, 1=Pro, 2=Basic)
+    /// @notice Batch mint NFTs to address list (all recipients get the same rarity)
+    /// @param recipients List of recipient addresses
+    /// @param rarity     NFT rarity tier (0=Founder, 1=Pro, 2=Basic)
     function airdropNFT(
         address[] calldata recipients,
         GUGUNFT.Rarity rarity
@@ -120,10 +120,10 @@ contract Airdrop is Ownable {
     }
 
     // ═══════════════════════════════════════════
-    //              紧急恢复
+    //              Emergency Recovery
     // ═══════════════════════════════════════════
 
-    /// @notice 取回合约中滞留的 ERC-20 Token
+    /// @notice Rescue ERC-20 tokens stuck in the contract
     function rescueToken(address token) external onlyOwner {
         uint256 balance = IERC20(token).balanceOf(address(this));
         if (balance > 0) {

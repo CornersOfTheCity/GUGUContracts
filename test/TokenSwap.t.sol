@@ -6,7 +6,7 @@ import {GUGUToken} from "../src/GUGUToken.sol";
 import {TokenSwap} from "../src/TokenSwap.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-/// @dev 简单的 Mock ERC-20 用于测试
+/// @dev Simple Mock ERC-20 for testing
 contract MockToken is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {
         _mint(msg.sender, 10_000_000 * 1e18);
@@ -29,26 +29,27 @@ contract TokenSwapTest is Test {
     uint256 public constant RATE_USDT_TO_GUGU = 10 * 1e18;  // 1 USDT = 10 GUGU
 
     function setUp() public {
-        gugu = new GUGUToken(10_000_000 * 1e18);
+        gugu = new GUGUToken(owner);
+        gugu.mint(owner, 10_000_000 * 1e18);
         usdt = new MockToken("Mock USDT", "USDT");
-        swap = new TokenSwap();
+        swap = new TokenSwap(owner);
 
-        // 添加交易对 GUGU <=> USDT
+        // Add trading pair GUGU <=> USDT
         swap.addPair(address(gugu), address(usdt), RATE_GUGU_TO_USDT, RATE_USDT_TO_GUGU);
 
-        // 存入流动性
+        // Deposit liquidity
         gugu.approve(address(swap), 1_000_000 * 1e18);
         swap.addLiquidity(0, address(gugu), 1_000_000 * 1e18);
 
         usdt.approve(address(swap), 100_000 * 1e18);
         swap.addLiquidity(0, address(usdt), 100_000 * 1e18);
 
-        // 给 alice 一些代币
+        // Give alice some tokens
         gugu.transfer(alice, 10_000 * 1e18);
         usdt.transfer(alice, 1_000 * 1e18);
     }
 
-    // ── 兑换 ──
+    // -- Swapping --
 
     function test_SwapGuguToUsdt() public {
         vm.startPrank(alice);
@@ -56,7 +57,7 @@ contract TokenSwapTest is Test {
         swap.swap(0, address(gugu), 100 * 1e18);
         vm.stopPrank();
 
-        // 100 GUGU * 0.1 = 10 USDT, 扣手续费 0.3% = 9.97 USDT
+        // 100 GUGU * 0.1 = 10 USDT, minus 0.3% fee = 9.97 USDT
         uint256 expectedOut = 10 * 1e18 - (10 * 1e18 * 30 / 10000);
         assertEq(usdt.balanceOf(alice), 1_000 * 1e18 + expectedOut);
     }
@@ -67,12 +68,12 @@ contract TokenSwapTest is Test {
         swap.swap(0, address(usdt), 10 * 1e18);
         vm.stopPrank();
 
-        // 10 USDT * 10 = 100 GUGU, 扣手续费 0.3% = 99.7 GUGU
+        // 10 USDT * 10 = 100 GUGU, minus 0.3% fee = 99.7 GUGU
         uint256 expectedOut = 100 * 1e18 - (100 * 1e18 * 30 / 10000);
         assertEq(gugu.balanceOf(alice), 10_000 * 1e18 + expectedOut);
     }
 
-    // ── 预估查询 ──
+    // -- Estimate Query --
 
     function test_GetAmountOut() public view {
         (uint256 amountOut, uint256 fee) = swap.getAmountOut(0, address(gugu), 100 * 1e18);
@@ -80,7 +81,7 @@ contract TokenSwapTest is Test {
         assertEq(fee, 10 * 1e18 * 30 / 10000);
     }
 
-    // ── 交易对管理 ──
+    // -- Trading Pair Management --
 
     function test_AddPair() public view {
         assertEq(swap.pairCount(), 1);
@@ -100,7 +101,7 @@ contract TokenSwapTest is Test {
         vm.stopPrank();
     }
 
-    // ── 手续费 ──
+    // -- Fee Management --
 
     function test_SetFeeRate() public {
         swap.setFeeRate(50); // 0.5%
@@ -124,7 +125,7 @@ contract TokenSwapTest is Test {
         assertEq(usdt.balanceOf(alice), 1_010 * 1e18);
     }
 
-    // ── 流动性 ──
+    // -- Liquidity --
 
     function test_RemoveLiquidity() public {
         uint256 beforeBal = gugu.balanceOf(owner);
@@ -133,17 +134,17 @@ contract TokenSwapTest is Test {
     }
 
     function test_RevertInsufficientLiquidity() public {
-        // Alice 尝试兑换超过流动性的金额
+        // Alice tries to swap more than available liquidity
         gugu.transfer(alice, 5_000_000 * 1e18);
 
         vm.startPrank(alice);
         gugu.approve(address(swap), 5_000_000 * 1e18);
         vm.expectRevert();
-        swap.swap(0, address(gugu), 5_000_000 * 1e18); // 需要 500,000 USDT, 只有 100,000
+        swap.swap(0, address(gugu), 5_000_000 * 1e18); // Needs 500,000 USDT, only 100,000 available
         vm.stopPrank();
     }
 
-    // ── 权限 ──
+    // -- Permissions --
 
     function test_RevertAddPairNotOwner() public {
         vm.prank(alice);

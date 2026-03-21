@@ -12,34 +12,46 @@ import {GUGUNFT} from "./GUGUNFT.sol";
 
 /**
  * @title MysteryBox
- * @notice 盲盒合约 — 花费 GUGU Token 购买盲盒，使用 Chainlink VRF
- *         产生可验证的随机数来决定 NFT 稀有度。
+ * @notice Mystery box contract — spend GUGU Tokens to purchase mystery boxes,
+ *         using Chainlink VRF to generate verifiable random numbers for NFT rarity.
  *
- *         两步流程:
- *         1) buyBox: 用户扣除 Token(burn) + 发送 VRF 请求
- *         2) fulfillRandomWords: Chainlink 回调 → 铸造 NFT
+ *         Dynamic Pricing:
+ *           price = min(basePrice × (1 + tier × 0.5), maxPrice)
+ *           tier  = totalBoxOpened / 1000
+ *
+ *         Two-step process:
+ *         1) buyBox: User burns tokens + sends VRF request
+ *         2) fulfillRandomWords: Chainlink callback → mint NFT
  */
 contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
     GUGUToken public immutable guguToken;
     GUGUNFT public immutable guguNFT;
 
-    /// @notice 盲盒价格 (默认 100 GUGU = 100 * 1e18)
-    uint256 public boxPrice = 100 * 1e18;
+    // ── Dynamic Pricing ──
 
-    /// @notice 概率分布 (基于 10000): [Founder, Pro, Basic]
-    ///         默认: Founder 5%, Pro 25%, Basic 70%
+    /// @notice Base price for mystery box (default 100 GUGU)
+    uint256 public basePrice = 100 * 1e18;
+
+    /// @notice Maximum price cap (default 500 GUGU, owner can change)
+    uint256 public maxPrice = 500 * 1e18;
+
+    /// @notice Total number of boxes opened (drives tier calculation)
+    uint256 public totalBoxOpened;
+
+    /// @notice Probability distribution (based on 10000): [Founder, Pro, Basic]
+    ///         Default: Founder 5%, Pro 25%, Basic 70%
     uint256[3] public probabilities = [500, 2500, 7000];
 
-    /// @notice 单次最大购买数量
+    /// @notice Maximum purchase quantity per transaction
     uint256 public constant MAX_PER_TX = 5;
 
-    // ── Chainlink VRF 配置 ──
+    // ── Chainlink VRF Configuration ──
     uint256 public s_subscriptionId;
     bytes32 public s_keyHash;
     uint32 public s_callbackGasLimit = 500_000;
     uint16 public s_requestConfirmations = 3;
 
-    // ── VRF 请求追踪 ──
+    // ── VRF Request Tracking ──
     struct BoxRequest {
         address buyer;
         uint256 quantity;
@@ -51,9 +63,10 @@ contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
     uint256[] public requestIds;
 
     // ── Events ──
-    event BoxRequested(address indexed buyer, uint256 indexed requestId, uint256 quantity);
+    event BoxRequested(address indexed buyer, uint256 indexed requestId, uint256 quantity, uint256 totalCost);
     event BoxOpened(address indexed buyer, uint256 indexed tokenId, GUGUNFT.Rarity rarity);
-    event BoxPriceUpdated(uint256 newPrice);
+    event BasePriceUpdated(uint256 newBasePrice);
+    event MaxPriceUpdated(uint256 newMaxPrice);
     event ProbabilitiesUpdated(uint256[3] newProbs);
 
     // ── Errors ──
@@ -61,6 +74,7 @@ contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
     error ProbabilitiesMustSum10000();
     error RequestNotFound(uint256 requestId);
     error RequestAlreadyFulfilled(uint256 requestId);
+    error InvalidPrice();
 
     constructor(
         address _guguToken,
@@ -76,19 +90,37 @@ contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════
-    //            步骤 1: 购买盲盒
+    //              Dynamic Pricing
     // ═══════════════════════════════════════════
 
-    /// @notice 购买盲盒 — 扣除 Token 并发送 VRF 随机数请求
-    /// @param quantity 购买数量 (1-5)
+    /// @notice Calculate the current box price based on total boxes opened
+    /// @return price = min(basePrice × (1 + tier × 0.5), maxPrice)
+    ///         where tier = totalBoxOpened / 1000
+    function currentBoxPrice() public view returns (uint256) {
+        uint256 tier = totalBoxOpened / 1000;
+        // price = basePrice * (1 + tier * 0.5)
+        //       = basePrice * (2 + tier) / 2    (avoid floating point)
+        uint256 price = basePrice * (2 + tier) / 2;
+        return price < maxPrice ? price : maxPrice;
+    }
+
+    // ═══════════════════════════════════════════
+    //          Step 1: Purchase Mystery Box
+    // ═══════════════════════════════════════════
+
+    /// @notice Purchase mystery box — burn tokens and send VRF random number request
+    /// @param quantity Number of boxes to purchase (1-5)
     function buyBox(uint256 quantity) external nonReentrant {
         if (quantity == 0 || quantity > MAX_PER_TX) revert InvalidQuantity();
 
-        // Burn Token (用户必须先 approve)
-        uint256 totalCost = boxPrice * quantity;
+        // Calculate total cost using dynamic pricing
+        uint256 unitPrice = currentBoxPrice();
+        uint256 totalCost = unitPrice * quantity;
+
+        // Burn tokens (user must approve beforehand)
         guguToken.burnFrom(msg.sender, totalCost);
 
-        // 请求 VRF 随机数
+        // Request VRF random numbers
         uint256 requestId = s_vrfCoordinator.requestRandomWords(
             VRFV2PlusClient.RandomWordsRequest({
                 keyHash: s_keyHash,
@@ -110,14 +142,14 @@ contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
         });
         requestIds.push(requestId);
 
-        emit BoxRequested(msg.sender, requestId, quantity);
+        emit BoxRequested(msg.sender, requestId, quantity, totalCost);
     }
 
     // ═══════════════════════════════════════════
-    //       步骤 2: Chainlink 回调铸造 NFT
+    //     Step 2: Chainlink Callback — Mint NFT
     // ═══════════════════════════════════════════
 
-    /// @dev Chainlink VRF 回调
+    /// @dev Chainlink VRF callback
     function fulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) internal override {
         BoxRequest storage req = requests[requestId];
         if (req.buyer == address(0)) revert RequestNotFound(requestId);
@@ -126,7 +158,10 @@ contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
         req.fulfilled = true;
         req.randomWords = randomWords;
 
-        // 根据随机数铸造 NFT
+        // Increment total box opened counter
+        totalBoxOpened += randomWords.length;
+
+        // Mint NFTs based on random numbers
         for (uint256 i = 0; i < randomWords.length; i++) {
             GUGUNFT.Rarity rarity = _determineRarity(randomWords[i]);
             uint256 tokenId = guguNFT.mint(req.buyer, rarity);
@@ -135,10 +170,10 @@ contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════
-    //                查询
+    //                Queries
     // ═══════════════════════════════════════════
 
-    /// @notice 查询 VRF 请求状态
+    /// @notice Query VRF request status
     function getRequestStatus(uint256 requestId)
         external
         view
@@ -149,18 +184,27 @@ contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
         return (req.fulfilled, req.randomWords);
     }
 
-    /// @notice 所有请求 ID
+    /// @notice Get all request IDs
     function getRequestIds() external view returns (uint256[] memory) {
         return requestIds;
     }
 
     // ═══════════════════════════════════════════
-    //              Owner 管理
+    //              Owner Management
     // ═══════════════════════════════════════════
 
-    function setBoxPrice(uint256 price) external onlyOwner {
-        boxPrice = price;
-        emit BoxPriceUpdated(price);
+    /// @notice Update the base price for dynamic pricing
+    function setBasePrice(uint256 _basePrice) external onlyOwner {
+        if (_basePrice == 0) revert InvalidPrice();
+        basePrice = _basePrice;
+        emit BasePriceUpdated(_basePrice);
+    }
+
+    /// @notice Update the maximum price cap
+    function setMaxPrice(uint256 _maxPrice) external onlyOwner {
+        if (_maxPrice == 0) revert InvalidPrice();
+        maxPrice = _maxPrice;
+        emit MaxPriceUpdated(_maxPrice);
     }
 
     function setProbabilities(uint256[3] calldata probs) external onlyOwner {
@@ -184,10 +228,10 @@ contract MysteryBox is VRFConsumerBaseV2Plus, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════
-    //              内部方法
+    //              Internal Methods
     // ═══════════════════════════════════════════
 
-    /// @dev 根据随机数决定稀有度
+    /// @dev Determine NFT rarity based on random number
     function _determineRarity(uint256 randomWord) internal view returns (GUGUNFT.Rarity) {
         uint256 roll = randomWord % 10000;
 

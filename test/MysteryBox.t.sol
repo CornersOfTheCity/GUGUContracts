@@ -21,20 +21,21 @@ contract MysteryBoxTest is Test {
     bytes32 public constant KEY_HASH = bytes32(uint256(1));
 
     function setUp() public {
-        // 部署 VRF Mock (低费用用于测试)
+        // Deploy VRF Mock (low fees for testing)
         vrfCoordinator = new VRFCoordinatorV2_5Mock(
             0.001 ether,    // baseFee
             0.000001 ether, // gasPriceLink
             1e18            // weiPerUnitLink (1 LINK = 1 ETH)
         );
 
-        // 创建 subscription 并充值
+        // Create subscription and fund it
         subId = vrfCoordinator.createSubscription();
         vrfCoordinator.fundSubscription(subId, 10_000_000 ether);
 
-        // 部署合约
-        token = new GUGUToken(10_000_000 * 1e18);
-        nft = new GUGUNFT();
+        // Deploy contracts
+        token = new GUGUToken(owner);
+        token.mint(owner, 10_000_000 * 1e18);
+        nft = new GUGUNFT(owner);
         mysteryBox = new MysteryBox(
             address(token),
             address(nft),
@@ -43,28 +44,42 @@ contract MysteryBoxTest is Test {
             KEY_HASH
         );
 
-        // 配置权限
+        // Configure permissions
         nft.addMinter(address(mysteryBox));
 
-        // 注册 consumer
+        // Register consumer
         vrfCoordinator.addConsumer(subId, address(mysteryBox));
 
-        // 给 alice 一些 Token
+        // Give alice some tokens
         token.transfer(alice, 10000 * 1e18);
     }
 
-    // ── 购买 ──
+    // -- Dynamic Pricing --
+
+    function test_InitialPrice() public view {
+        // tier=0, price = 100 * (2+0) / 2 = 100 GUGU
+        assertEq(mysteryBox.currentBoxPrice(), 100 * 1e18);
+    }
+
+    function test_DefaultBaseAndMax() public view {
+        assertEq(mysteryBox.basePrice(), 100 * 1e18);
+        assertEq(mysteryBox.maxPrice(), 500 * 1e18);
+    }
+
+    // -- Purchasing --
 
     function test_BuyBox() public {
+        uint256 price = mysteryBox.currentBoxPrice(); // 100 GUGU
+
         vm.startPrank(alice);
-        token.approve(address(mysteryBox), 100 * 1e18);
+        token.approve(address(mysteryBox), price);
         mysteryBox.buyBox(1);
         vm.stopPrank();
 
-        // Token 被 burn
-        assertEq(token.balanceOf(alice), 9900 * 1e18);
+        // Tokens are burned
+        assertEq(token.balanceOf(alice), 10000 * 1e18 - price);
 
-        // 有一个 pending request
+        // There should be one pending request
         uint256[] memory ids = mysteryBox.getRequestIds();
         assertEq(ids.length, 1);
 
@@ -73,12 +88,14 @@ contract MysteryBoxTest is Test {
     }
 
     function test_BuyBoxBatch() public {
+        uint256 price = mysteryBox.currentBoxPrice();
+
         vm.startPrank(alice);
-        token.approve(address(mysteryBox), 500 * 1e18);
+        token.approve(address(mysteryBox), price * 5);
         mysteryBox.buyBox(5);
         vm.stopPrank();
 
-        assertEq(token.balanceOf(alice), 9500 * 1e18);
+        assertEq(token.balanceOf(alice), 10000 * 1e18 - price * 5);
     }
 
     function test_RevertBuyBoxZeroQuantity() public {
@@ -93,30 +110,37 @@ contract MysteryBoxTest is Test {
         mysteryBox.buyBox(6);
     }
 
-    // ── VRF 回调 ──
+    // -- VRF Callback --
 
     function test_FulfillRandomWords() public {
+        uint256 price = mysteryBox.currentBoxPrice();
+
         vm.startPrank(alice);
-        token.approve(address(mysteryBox), 100 * 1e18);
+        token.approve(address(mysteryBox), price);
         mysteryBox.buyBox(1);
         vm.stopPrank();
 
         uint256[] memory ids = mysteryBox.getRequestIds();
 
-        // Mock VRF 回调
+        // Mock VRF callback
         vrfCoordinator.fulfillRandomWords(ids[0], address(mysteryBox));
 
-        // 请求已完成
+        // Request should be fulfilled
         (bool fulfilled,) = mysteryBox.getRequestStatus(ids[0]);
         assertTrue(fulfilled);
 
-        // Alice 应该获得一个 NFT
+        // Alice should have received one NFT
         assertEq(nft.balanceOf(alice), 1);
+
+        // totalBoxOpened should be incremented
+        assertEq(mysteryBox.totalBoxOpened(), 1);
     }
 
     function test_FulfillMultipleBoxes() public {
+        uint256 price = mysteryBox.currentBoxPrice();
+
         vm.startPrank(alice);
-        token.approve(address(mysteryBox), 300 * 1e18);
+        token.approve(address(mysteryBox), price * 3);
         mysteryBox.buyBox(3);
         vm.stopPrank();
 
@@ -124,13 +148,32 @@ contract MysteryBoxTest is Test {
         vrfCoordinator.fulfillRandomWords(ids[0], address(mysteryBox));
 
         assertEq(nft.balanceOf(alice), 3);
+        assertEq(mysteryBox.totalBoxOpened(), 3);
     }
 
-    // ── 管理 ──
+    // -- Management --
 
-    function test_SetBoxPrice() public {
-        mysteryBox.setBoxPrice(200 * 1e18);
-        assertEq(mysteryBox.boxPrice(), 200 * 1e18);
+    function test_SetBasePrice() public {
+        mysteryBox.setBasePrice(200 * 1e18);
+        assertEq(mysteryBox.basePrice(), 200 * 1e18);
+        // tier=0: price = 200 * (2+0) / 2 = 200
+        assertEq(mysteryBox.currentBoxPrice(), 200 * 1e18);
+    }
+
+    function test_SetMaxPrice() public {
+        mysteryBox.setMaxPrice(300 * 1e18);
+        assertEq(mysteryBox.maxPrice(), 300 * 1e18);
+    }
+
+    function test_PriceCapAtMax() public {
+        // Set a low max to test cap
+        mysteryBox.setMaxPrice(120 * 1e18);
+        // tier=0: price = 100, < 120 → 100
+        assertEq(mysteryBox.currentBoxPrice(), 100 * 1e18);
+
+        mysteryBox.setMaxPrice(90 * 1e18);
+        // tier=0: price = 100, > 90 → capped at 90
+        assertEq(mysteryBox.currentBoxPrice(), 90 * 1e18);
     }
 
     function test_SetProbabilities() public {

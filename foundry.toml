@@ -8,4 +8,4 @@ remappings = [
     "@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/",
 ]
 
-solc_version = "0.8.28"
+solc_version = "0.8.27"

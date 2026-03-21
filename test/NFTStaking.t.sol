@@ -15,21 +15,22 @@ contract NFTStakingTest is Test {
     address public alice = makeAddr("alice");
 
     function setUp() public {
-        token = new GUGUToken(10_000_000 * 1e18);
-        nft = new GUGUNFT();
-        staking = new NFTStaking(address(token), address(nft));
+        token = new GUGUToken(owner);
+        token.mint(owner, 10_000_000 * 1e18);
+        nft = new GUGUNFT(owner);
+        staking = new NFTStaking(owner, address(token), address(nft));
 
-        // 预充值 Staking 合约的 Token 奖励池
+        // Pre-fund the Staking contract's token reward pool
         token.transfer(address(staking), 1_000_000 * 1e18);
 
-        // 给 alice 铸造一些 NFT
+        // Mint some NFTs for alice
         nft.addMinter(address(this));
         nft.mint(alice, GUGUNFT.Rarity.Founder); // tokenId 1
         nft.mint(alice, GUGUNFT.Rarity.Pro);     // tokenId 2
         nft.mint(alice, GUGUNFT.Rarity.Basic);   // tokenId 3
     }
 
-    // ── 质押 ──
+    // -- Staking --
 
     function test_Stake() public {
         vm.startPrank(alice);
@@ -61,15 +62,15 @@ contract NFTStakingTest is Test {
         assertEq(staking.stakedCountOf(alice), 3);
     }
 
-    // ── 奖励计算 ──
+    // -- Reward Calculation --
 
     function test_RewardsFounder() public {
         vm.startPrank(alice);
         nft.approve(address(staking), 1);
-        staking.stake(1); // Founder: 50 GUGU/天
+        staking.stake(1); // Founder: 50 GUGU/day
         vm.stopPrank();
 
-        // 快进 1 天
+        // Fast forward 1 day
         vm.warp(block.timestamp + 1 days);
 
         uint256 pending = staking.pendingRewards(alice);
@@ -79,7 +80,7 @@ contract NFTStakingTest is Test {
     function test_RewardsPro() public {
         vm.startPrank(alice);
         nft.approve(address(staking), 2);
-        staking.stake(2); // Pro: 15 GUGU/天
+        staking.stake(2); // Pro: 15 GUGU/day
         vm.stopPrank();
 
         vm.warp(block.timestamp + 1 days);
@@ -91,7 +92,7 @@ contract NFTStakingTest is Test {
     function test_RewardsBasic() public {
         vm.startPrank(alice);
         nft.approve(address(staking), 3);
-        staking.stake(3); // Basic: 3 GUGU/天
+        staking.stake(3); // Basic: 3 GUGU/day
         vm.stopPrank();
 
         vm.warp(block.timestamp + 1 days);
@@ -106,13 +107,13 @@ contract NFTStakingTest is Test {
         staking.stake(1); // Founder
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 7 days); // 7 天
+        vm.warp(block.timestamp + 7 days); // 7 days
 
         uint256 pending = staking.pendingRewards(alice);
         assertEq(pending, 350 * 1e18); // 50 * 7 = 350
     }
 
-    // ── 领取奖励 ──
+    // -- Claim Rewards --
 
     function test_ClaimRewards() public {
         vm.startPrank(alice);
@@ -127,11 +128,11 @@ contract NFTStakingTest is Test {
 
         assertEq(token.balanceOf(alice), 50 * 1e18);
 
-        // 领取后 pending 应为 0
+        // Pending should be 0 after claiming
         assertEq(staking.pendingRewards(alice), 0);
     }
 
-    // ── 取消质押 ──
+    // -- Unstaking --
 
     function test_Unstake() public {
         vm.startPrank(alice);
@@ -144,7 +145,7 @@ contract NFTStakingTest is Test {
         vm.prank(alice);
         staking.unstake(1);
 
-        assertEq(nft.ownerOf(1), alice); // NFT 归还
+        assertEq(nft.ownerOf(1), alice); // NFT returned
         assertEq(token.balanceOf(alice), 100 * 1e18); // 50 * 2 = 100
         assertEq(staking.stakedCountOf(alice), 0);
     }
@@ -160,16 +161,16 @@ contract NFTStakingTest is Test {
         staking.unstake(1);
     }
 
-    // ── 多个 NFT 质押和领取 ──
+    // -- Multiple NFT Staking and Rewards --
 
     function test_MultipleStakesReward() public {
         vm.startPrank(alice);
         nft.approve(address(staking), 1);
         nft.approve(address(staking), 2);
         nft.approve(address(staking), 3);
-        staking.stake(1); // Founder: 50/天
-        staking.stake(2); // Pro: 15/天
-        staking.stake(3); // Basic: 3/天
+        staking.stake(1); // Founder: 50/day
+        staking.stake(2); // Pro: 15/day
+        staking.stake(3); // Basic: 3/day
         vm.stopPrank();
 
         vm.warp(block.timestamp + 1 days);

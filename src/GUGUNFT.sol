@@ -15,25 +15,23 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 contract GUGUNFT is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, ReentrancyGuard {
     enum Rarity { Founder, Pro, Basic }
 
-    /// @notice 每个 tokenId 对应的稀有度
+    /// @notice Rarity associated with each tokenId
     mapping(uint256 => Rarity) private _tokenRarity;
 
-    /// @notice 每种稀有度已铸造数量
+    /// @notice Total minted count per rarity
     mapping(Rarity => uint256) public totalSupplyByRarity;
 
-    /// @notice 每种稀有度最大供应量
-    mapping(Rarity => uint256) public maxSupplyByRarity;
 
-    /// @notice 每种稀有度的铸造价格 (ETH)
+    /// @notice Mint price per rarity (in ETH)
     mapping(Rarity => uint256) public mintPriceByRarity;
 
-    /// @notice 授权 Minter (盲盒合约等)
+    /// @notice Authorized minters (e.g. MysteryBox contract)
     mapping(address => bool) public minters;
 
-    /// @dev 下一个 tokenId
+    /// @dev Next tokenId to mint
     uint256 private _nextTokenId;
 
-    /// @notice baseURI
+    /// @notice Base token URI
     string private _baseTokenURI;
 
     // ── Events ──
@@ -43,44 +41,37 @@ contract GUGUNFT is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentra
 
     // ── Errors ──
     error NotMinter(address caller);
-    error ExceedsMaxSupply(Rarity rarity);
+
     error InsufficientPayment(uint256 required, uint256 sent);
     error WithdrawFailed();
+    error InvalidPrice();
 
     modifier onlyMinter() {
         if (!minters[msg.sender]) revert NotMinter(msg.sender);
         _;
     }
 
-    constructor() ERC721("GUGU NFT", "GUGUNFT") Ownable(msg.sender) {
-        // 最大供应量
-        maxSupplyByRarity[Rarity.Founder] = 100;
-        maxSupplyByRarity[Rarity.Pro] = 500;
-        maxSupplyByRarity[Rarity.Basic] = 2000;
-
-        // 铸造价格
-        mintPriceByRarity[Rarity.Founder] = 0.5 ether;
-        mintPriceByRarity[Rarity.Pro] = 0.1 ether;
-        mintPriceByRarity[Rarity.Basic] = 0.02 ether;
+    constructor(address initialOwner) ERC721("GUGU NFT", "GUGUNFT") Ownable(initialOwner) {
+        // Mint price (~$5 / ~$50 / ~$500 at ETH ≈ $2000)
+        mintPriceByRarity[Rarity.Founder] = 0.25 ether;
+        mintPriceByRarity[Rarity.Pro] = 0.025 ether;
+        mintPriceByRarity[Rarity.Basic] = 0.0025 ether;
 
         _nextTokenId = 1;
     }
 
     // ═══════════════════════════════════════════
-    //                公开铸造
+    //              Public Minting
     // ═══════════════════════════════════════════
 
-    /// @notice 用户付 ETH 铸造指定稀有度的 NFT
+    /// @notice Mint an NFT of the specified rarity by paying ETH
     function mintPublic(Rarity rarity) external payable nonReentrant {
         uint256 price = mintPriceByRarity[rarity];
         if (msg.value < price) revert InsufficientPayment(price, msg.value);
-        if (totalSupplyByRarity[rarity] >= maxSupplyByRarity[rarity]) {
-            revert ExceedsMaxSupply(rarity);
-        }
 
         uint256 tokenId = _mintInternal(msg.sender, rarity);
 
-        // 退还多余的 ETH
+        // Refund excess ETH
         if (msg.value > price) {
             (bool success,) = payable(msg.sender).call{value: msg.value - price}("");
             require(success, "Refund failed");
@@ -90,36 +81,30 @@ contract GUGUNFT is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentra
     }
 
     // ═══════════════════════════════════════════
-    //             授权铸造 (盲盒等)
+    //         Authorized Minting (MysteryBox, etc.)
     // ═══════════════════════════════════════════
 
-    /// @notice 授权 Minter 铸造 (不需要付 ETH)
+    /// @notice Authorized minter mint (no ETH required)
     function mint(address to, Rarity rarity) external onlyMinter returns (uint256) {
-        if (totalSupplyByRarity[rarity] >= maxSupplyByRarity[rarity]) {
-            revert ExceedsMaxSupply(rarity);
-        }
         uint256 tokenId = _mintInternal(to, rarity);
         emit NFTMinted(to, tokenId, rarity);
         return tokenId;
     }
 
-    /// @notice 授权 Minter 批量铸造（同一稀有度，同一地址）
-    /// @param to       接收地址
-    /// @param rarity   稀有度
-    /// @param quantity 数量（最多 50）
+    /// @notice Authorized minter batch mint (same rarity, same recipient)
+    /// @param to       Recipient address
+    /// @param rarity   NFT rarity tier
+    /// @param quantity Number of NFTs to mint (max 50)
     function mintBatch(address to, Rarity rarity, uint256 quantity) external onlyMinter {
         require(quantity > 0 && quantity <= 50, "Invalid quantity");
         for (uint256 i = 0; i < quantity; i++) {
-            if (totalSupplyByRarity[rarity] >= maxSupplyByRarity[rarity]) {
-                revert ExceedsMaxSupply(rarity);
-            }
             uint256 tokenId = _mintInternal(to, rarity);
             emit NFTMinted(to, tokenId, rarity);
         }
     }
 
     // ═══════════════════════════════════════════
-    //              Minter 管理
+    //              Minter Management
     // ═══════════════════════════════════════════
 
     function addMinter(address minter) external onlyOwner {
@@ -133,28 +118,31 @@ contract GUGUNFT is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentra
     }
 
     // ═══════════════════════════════════════════
-    //                查询
+    //                Queries
     // ═══════════════════════════════════════════
 
-    /// @notice 查询 NFT 稀有度
+    /// @notice Get the rarity of an NFT
     function getRarity(uint256 tokenId) external view returns (Rarity) {
-        _requireOwned(tokenId); // 确保 token 存在
+        _requireOwned(tokenId); // Ensure the token exists
         return _tokenRarity[tokenId];
     }
 
-    /// @notice 总供应量 (所有稀有度)
-    function maxTotalSupply() external view returns (uint256) {
-        return maxSupplyByRarity[Rarity.Founder]
-            + maxSupplyByRarity[Rarity.Pro]
-            + maxSupplyByRarity[Rarity.Basic];
-    }
+
 
     // ═══════════════════════════════════════════
-    //              Owner 管理
+    //              Owner Management
     // ═══════════════════════════════════════════
 
     function setBaseURI(string calldata baseURI) external onlyOwner {
         _baseTokenURI = baseURI;
+    }
+
+    /// @notice Update the mint price for a specific rarity
+    /// @param rarity NFT rarity tier (0=Founder, 1=Pro, 2=Basic)
+    /// @param price  New price in wei (e.g. 0.25 ether)
+    function setMintPrice(Rarity rarity, uint256 price) external onlyOwner {
+        if (price == 0) revert InvalidPrice();
+        mintPriceByRarity[rarity] = price;
     }
 
     function withdraw() external onlyOwner {
@@ -163,7 +151,7 @@ contract GUGUNFT is ERC721, ERC721Enumerable, ERC721URIStorage, Ownable, Reentra
     }
 
     // ═══════════════════════════════════════════
-    //              内部方法
+    //              Internal Methods
     // ═══════════════════════════════════════════
 
     function _mintInternal(address to, Rarity rarity) internal returns (uint256) {

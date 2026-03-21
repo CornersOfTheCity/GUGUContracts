@@ -13,34 +13,30 @@ contract GUGUNFTTest is Test {
     receive() external payable {}
 
     function setUp() public {
-        nft = new GUGUNFT();
+        nft = new GUGUNFT(owner);
     }
 
-    // ── 基本信息 ──
+    // -- Basic Info --
 
     function test_Name() public view {
         assertEq(nft.name(), "GUGU NFT");
         assertEq(nft.symbol(), "GUGUNFT");
     }
 
-    function test_MaxSupply() public view {
-        assertEq(nft.maxSupplyByRarity(GUGUNFT.Rarity.Founder), 100);
-        assertEq(nft.maxSupplyByRarity(GUGUNFT.Rarity.Pro), 500);
-        assertEq(nft.maxSupplyByRarity(GUGUNFT.Rarity.Basic), 2000);
-    }
+
 
     function test_MintPrices() public view {
-        assertEq(nft.mintPriceByRarity(GUGUNFT.Rarity.Founder), 0.5 ether);
-        assertEq(nft.mintPriceByRarity(GUGUNFT.Rarity.Pro), 0.1 ether);
-        assertEq(nft.mintPriceByRarity(GUGUNFT.Rarity.Basic), 0.02 ether);
+        assertEq(nft.mintPriceByRarity(GUGUNFT.Rarity.Founder), 0.25 ether);
+        assertEq(nft.mintPriceByRarity(GUGUNFT.Rarity.Pro), 0.025 ether);
+        assertEq(nft.mintPriceByRarity(GUGUNFT.Rarity.Basic), 0.0025 ether);
     }
 
-    // ── 公开铸造 ──
+    // -- Public Minting --
 
     function test_MintPublicBasic() public {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        nft.mintPublic{value: 0.02 ether}(GUGUNFT.Rarity.Basic);
+        nft.mintPublic{value: 0.0025 ether}(GUGUNFT.Rarity.Basic);
 
         assertEq(nft.balanceOf(alice), 1);
         assertEq(nft.ownerOf(1), alice);
@@ -51,7 +47,7 @@ contract GUGUNFTTest is Test {
     function test_MintPublicFounder() public {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        nft.mintPublic{value: 0.5 ether}(GUGUNFT.Rarity.Founder);
+        nft.mintPublic{value: 0.25 ether}(GUGUNFT.Rarity.Founder);
 
         assertEq(nft.balanceOf(alice), 1);
         assertEq(uint256(nft.getRarity(1)), uint256(GUGUNFT.Rarity.Founder));
@@ -61,35 +57,20 @@ contract GUGUNFTTest is Test {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
         vm.expectRevert();
-        nft.mintPublic{value: 0.01 ether}(GUGUNFT.Rarity.Basic);
+        nft.mintPublic{value: 0.001 ether}(GUGUNFT.Rarity.Basic);
     }
 
     function test_RefundExcessPayment() public {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        nft.mintPublic{value: 0.5 ether}(GUGUNFT.Rarity.Basic); // 多付
-        // 退还 0.5 - 0.02 = 0.48 ether
-        assertEq(alice.balance, 0.98 ether);
+        nft.mintPublic{value: 0.25 ether}(GUGUNFT.Rarity.Basic); // Overpaid
+        // Refund: 0.25 - 0.0025 = 0.2475 ether
+        assertEq(alice.balance, 0.75 ether + 0.2475 ether);
     }
 
-    function test_RevertExceedsMaxSupply() public {
-        vm.deal(alice, 300 ether);
-        vm.startPrank(alice);
-        // Basic 最大 2000, 先铸 2000 个, 这里我们只测几个然后mock
-        vm.stopPrank();
 
-        // 通过 Minter 铸造到上限
-        nft.addMinter(minter);
-        vm.startPrank(minter);
-        for (uint256 i = 0; i < 100; i++) {
-            nft.mint(alice, GUGUNFT.Rarity.Founder);
-        }
-        vm.expectRevert();
-        nft.mint(alice, GUGUNFT.Rarity.Founder); // 第 101 个
-        vm.stopPrank();
-    }
 
-    // ── 授权铸造 ──
+    // -- Authorized Minting --
 
     function test_MinterMint() public {
         nft.addMinter(minter);
@@ -107,7 +88,7 @@ contract GUGUNFTTest is Test {
         nft.mint(alice, GUGUNFT.Rarity.Basic);
     }
 
-    // ── BaseURI ──
+    // -- BaseURI --
 
     function test_SetBaseURI() public {
         nft.setBaseURI("https://api.gugu.io/nft/");
@@ -117,15 +98,15 @@ contract GUGUNFTTest is Test {
         assertEq(nft.tokenURI(1), "https://api.gugu.io/nft/1");
     }
 
-    // ── Withdraw ──
+    // -- Withdraw --
 
     function test_Withdraw() public {
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        nft.mintPublic{value: 0.5 ether}(GUGUNFT.Rarity.Founder);
+        nft.mintPublic{value: 0.25 ether}(GUGUNFT.Rarity.Founder);
 
         uint256 ownerBalBefore = owner.balance;
         nft.withdraw();
-        assertEq(owner.balance - ownerBalBefore, 0.5 ether);
+        assertEq(owner.balance - ownerBalBefore, 0.25 ether);
     }
 }

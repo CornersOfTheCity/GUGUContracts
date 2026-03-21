@@ -13,10 +13,11 @@ contract GUGUTokenTest is Test {
     uint256 public constant INITIAL_SUPPLY = 10_000_000 * 1e18;
 
     function setUp() public {
-        token = new GUGUToken(INITIAL_SUPPLY);
+        token = new GUGUToken(owner);
+        token.mint(owner, INITIAL_SUPPLY);
     }
 
-    // ── 基本信息 ──
+    // -- Basic Info --
 
     function test_Name() public view {
         assertEq(token.name(), "GUGU Token");
@@ -35,7 +36,7 @@ contract GUGUTokenTest is Test {
         assertEq(token.MAX_SUPPLY(), 100_000_000 * 1e18);
     }
 
-    // ── 铸造 (Owner Only) ──
+    // -- Minting (Owner Only) --
 
     function test_OwnerCanMint() public {
         token.mint(alice, 1000 * 1e18);
@@ -50,10 +51,10 @@ contract GUGUTokenTest is Test {
 
     function test_RevertMintExceedsMaxSupply() public {
         vm.expectRevert();
-        token.mint(alice, 100_000_000 * 1e18); // 已有 10M, 再铸 100M 会超限
+        token.mint(alice, 100_000_000 * 1e18); // Already have 10M, minting 100M exceeds cap
     }
 
-    // ── 销毁 ──
+    // -- Burning --
 
     function test_Burn() public {
         uint256 burnAmount = 100 * 1e18;
@@ -69,7 +70,7 @@ contract GUGUTokenTest is Test {
         assertEq(token.balanceOf(alice), 500 * 1e18);
     }
 
-    // ── 黑名单 ──
+    // -- Blacklist --
 
     function test_AddBlacklist() public {
         token.addBlacklist(alice);

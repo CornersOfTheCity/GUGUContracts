@@ -7,21 +7,21 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title GUGUToken
- * @notice ERC-20 代币合约，总量上限 1 亿枚
- *         功能: Owner 铸造、销毁、黑名单
+ * @notice ERC-20 token contract with a hard cap of 100 million tokens
+ *         Features: Owner minting, burning, blacklist
  *
- *         代币分配:
- *         - Uniswap 流动性池: 3,000 万 (30%)
- *         - NFT 质押产出:     4,000 万 (40%)
- *         - 团队持有:         1,500 万 (15%)
- *         - 盲盒运营:         1,000 万 (10%)
- *         - 预留:               500 万 (5%)
+ *         Token Allocation:
+ *         - Uniswap Liquidity Pool: 30,000,000 (30%)
+ *         - NFT Staking Rewards:    40,000,000 (40%)
+ *         - Team:                   15,000,000 (15%)
+ *         - Mystery Box Operations: 10,000,000 (10%)
+ *         - Reserve:                 5,000,000 (5%)
  */
 contract GUGUToken is ERC20, ERC20Burnable, Ownable {
-    /// @notice 代币总量上限: 1 亿枚
+    /// @notice Maximum token supply: 100 million
     uint256 public constant MAX_SUPPLY = 100_000_000 * 1e18;
 
-    /// @notice 黑名单
+    /// @notice Blacklist
     mapping(address => bool) public blacklisted;
 
     event Blacklisted(address indexed account);
@@ -31,18 +31,15 @@ contract GUGUToken is ERC20, ERC20Burnable, Ownable {
     error AccountBlacklisted(address account);
 
     /**
-     * @param initialSupply 初始铸造数量 (含精度, 如 60_000_000 * 1e18)
+     * @param initialOwner Address of the contract owner
      */
-    constructor(uint256 initialSupply) ERC20("GUGU Token", "GUGU") Ownable(msg.sender) {
-        if (initialSupply > MAX_SUPPLY) revert ExceedsMaxSupply(initialSupply, MAX_SUPPLY);
-        _mint(msg.sender, initialSupply);
-    }
+    constructor(address initialOwner) ERC20("GUGU Token", "GUGU") Ownable(initialOwner) {}
 
     // ═══════════════════════════════════════════
-    //              铸造 (仅 Owner)
+    //              Minting (Owner Only)
     // ═══════════════════════════════════════════
 
-    /// @notice Owner 铸造代币（受 MAX_SUPPLY 上限限制）
+    /// @notice Owner mints tokens (capped by MAX_SUPPLY)
     function mint(address to, uint256 amount) external onlyOwner {
         if (totalSupply() + amount > MAX_SUPPLY) {
             revert ExceedsMaxSupply(totalSupply() + amount, MAX_SUPPLY);
@@ -51,26 +48,26 @@ contract GUGUToken is ERC20, ERC20Burnable, Ownable {
     }
 
     // ═══════════════════════════════════════════
-    //              黑名单
+    //              Blacklist
     // ═══════════════════════════════════════════
 
-    /// @notice 加入黑名单（仅 Owner）
+    /// @notice Add to blacklist (Owner only)
     function addBlacklist(address account) external onlyOwner {
         blacklisted[account] = true;
         emit Blacklisted(account);
     }
 
-    /// @notice 移除黑名单（仅 Owner）
+    /// @notice Remove from blacklist (Owner only)
     function removeBlacklist(address account) external onlyOwner {
         blacklisted[account] = false;
         emit Unblacklisted(account);
     }
 
     // ═══════════════════════════════════════════
-    //              转账限制
+    //              Transfer Restrictions
     // ═══════════════════════════════════════════
 
-    /// @dev 重写 _update 以实现黑名单检查
+    /// @dev Override _update to enforce blacklist checks
     function _update(address from, address to, uint256 amount) internal override {
         if (blacklisted[from]) revert AccountBlacklisted(from);
         if (blacklisted[to]) revert AccountBlacklisted(to);

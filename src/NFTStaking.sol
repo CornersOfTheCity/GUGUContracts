@@ -9,32 +9,32 @@ import {GUGUToken} from "./GUGUToken.sol";
 
 /**
  * @title NFTStaking
- * @notice 质押 GUGUNFT 获取 GUGUToken 奖励（从合约预充值的 Token 池中发放）
- *         - Founder: 50 GUGU/天
- *         - Pro:     15 GUGU/天
- *         - Basic:    3 GUGU/天
+ * @notice Stake GUGUNFT to earn GUGUToken rewards (distributed from pre-funded token pool)
+ *         - Founder: 50 GUGU/day
+ *         - Pro:     15 GUGU/day
+ *         - Basic:    3 GUGU/day
  */
 contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
     GUGUToken public immutable guguToken;
     GUGUNFT public immutable guguNFT;
 
-    /// @notice 每种稀有度的每日奖励 (含精度 1e18)
+    /// @notice Daily reward per rarity (with 1e18 precision)
     mapping(GUGUNFT.Rarity => uint256) public dailyReward;
 
-    /// @notice 质押信息
+    /// @notice Staking information
     struct StakeInfo {
         address owner;
         uint256 stakedAt;
         uint256 lastClaimedAt;
     }
 
-    /// @notice tokenId => 质押信息
+    /// @notice tokenId => staking information
     mapping(uint256 => StakeInfo) public stakes;
 
-    /// @notice 用户 => 质押的 tokenId 列表
+    /// @notice user => list of staked tokenIds
     mapping(address => uint256[]) private _userStakedTokens;
 
-    /// @notice tokenId 在用户数组中的索引
+    /// @notice tokenId index in user's staked array
     mapping(uint256 => uint256) private _tokenIndexInUser;
 
     // ── Events ──
@@ -47,21 +47,21 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
     error NotStakeOwner(uint256 tokenId);
     error TokenNotStaked(uint256 tokenId);
 
-    constructor(address _guguToken, address _guguNFT) Ownable(msg.sender) {
+    constructor(address initialOwner, address _guguToken, address _guguNFT) Ownable(initialOwner) {
         guguToken = GUGUToken(_guguToken);
         guguNFT = GUGUNFT(_guguNFT);
 
-        // 默认每日奖励 (含 18 位精度)
+        // Default daily rewards (with 18 decimals precision)
         dailyReward[GUGUNFT.Rarity.Founder] = 50 * 1e18;
         dailyReward[GUGUNFT.Rarity.Pro] = 15 * 1e18;
         dailyReward[GUGUNFT.Rarity.Basic] = 3 * 1e18;
     }
 
     // ═══════════════════════════════════════════
-    //                质押
+    //                Staking
     // ═══════════════════════════════════════════
 
-    /// @notice 质押单个 NFT
+    /// @notice Stake a single NFT
     function stake(uint256 tokenId) external nonReentrant {
         guguNFT.transferFrom(msg.sender, address(this), tokenId);
 
@@ -71,7 +71,7 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
             lastClaimedAt: block.timestamp
         });
 
-        // 加入用户列表
+        // Add to user's staked list
         _tokenIndexInUser[tokenId] = _userStakedTokens[msg.sender].length;
         _userStakedTokens[msg.sender].push(tokenId);
 
@@ -79,7 +79,7 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
         emit Staked(msg.sender, tokenId, rarity);
     }
 
-    /// @notice 批量质押
+    /// @notice Batch stake multiple NFTs
     function stakeBatch(uint256[] calldata tokenIds) external nonReentrant {
         for (uint256 i = 0; i < tokenIds.length; i++) {
             uint256 tokenId = tokenIds[i];
@@ -100,24 +100,24 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════
-    //              取消质押
+    //              Unstaking
     // ═══════════════════════════════════════════
 
-    /// @notice 取消质押，领取所有累积奖励
+    /// @notice Unstake and claim all accumulated rewards
     function unstake(uint256 tokenId) external nonReentrant {
         StakeInfo storage info = stakes[tokenId];
         if (info.owner != msg.sender) revert NotStakeOwner(tokenId);
 
         uint256 reward = _calculateReward(tokenId);
 
-        // 从用户列表中移除
+        // Remove from user's staked list
         _removeFromUserList(msg.sender, tokenId);
         delete stakes[tokenId];
 
-        // 先归还 NFT
+        // Return NFT first
         guguNFT.transferFrom(address(this), msg.sender, tokenId);
 
-        // 再发放奖励
+        // Then distribute rewards
         if (reward > 0) {
             guguToken.transfer(msg.sender, reward);
         }
@@ -125,7 +125,7 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
         emit Unstaked(msg.sender, tokenId, reward);
     }
 
-    /// @notice 批量取消质押
+    /// @notice Batch unstake multiple NFTs
     function unstakeBatch(uint256[] calldata tokenIds) external nonReentrant {
         uint256 totalReward = 0;
 
@@ -148,10 +148,10 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════
-    //              领取奖励
+    //              Claim Rewards
     // ═══════════════════════════════════════════
 
-    /// @notice 领取所有已质押 NFT 的累积奖励
+    /// @notice Claim accumulated rewards for all staked NFTs
     function claimRewards() external nonReentrant {
         uint256[] storage tokenIds = _userStakedTokens[msg.sender];
         uint256 totalReward = 0;
@@ -170,10 +170,10 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
     }
 
     // ═══════════════════════════════════════════
-    //                查询
+    //                Queries
     // ═══════════════════════════════════════════
 
-    /// @notice 查看用户待领取的总奖励
+    /// @notice View user's total pending rewards
     function pendingRewards(address user) external view returns (uint256) {
         uint256[] storage tokenIds = _userStakedTokens[user];
         uint256 totalReward = 0;
@@ -185,28 +185,35 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
         return totalReward;
     }
 
-    /// @notice 查看用户已质押的所有 tokenId
+    /// @notice View all tokenIds staked by a user
     function stakedTokensOf(address user) external view returns (uint256[] memory) {
         return _userStakedTokens[user];
     }
 
-    /// @notice 查看用户已质押的 NFT 数量
+    /// @notice View the number of NFTs staked by a user
     function stakedCountOf(address user) external view returns (uint256) {
         return _userStakedTokens[user].length;
     }
 
     // ═══════════════════════════════════════════
-    //              Owner 管理
+    //              Owner Management
     // ═══════════════════════════════════════════
 
-    /// @notice 设置某种稀有度的每日奖励
+    /// @notice Set daily reward for a specific rarity
     function setDailyReward(GUGUNFT.Rarity rarity, uint256 rewardPerDay) external onlyOwner {
         dailyReward[rarity] = rewardPerDay;
         emit DailyRewardUpdated(rarity, rewardPerDay);
     }
 
+    /// @notice Rescue GUGU tokens from the reward pool (emergency / excess recovery)
+    /// @param to   Recipient address
+    /// @param amount Amount of GUGU to withdraw
+    function rescueToken(address to, uint256 amount) external onlyOwner {
+        guguToken.transfer(to, amount);
+    }
+
     // ═══════════════════════════════════════════
-    //              内部方法
+    //              Internal Methods
     // ═══════════════════════════════════════════
 
     function _calculateReward(uint256 tokenId) internal view returns (uint256) {
@@ -215,7 +222,7 @@ contract NFTStaking is IERC721Receiver, Ownable, ReentrancyGuard {
 
         GUGUNFT.Rarity rarity = guguNFT.getRarity(tokenId);
         uint256 elapsed = block.timestamp - info.lastClaimedAt;
-        // dailyReward 已含 1e18 精度，除以 1 天的秒数
+        // dailyReward already includes 1e18 precision, divide by seconds in a day
         return (elapsed * dailyReward[rarity]) / 1 days;
     }
 
