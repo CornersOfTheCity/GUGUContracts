@@ -59,7 +59,8 @@ contract Deploy is Script {
         GUGUToken token = new GUGUToken(initialOwner);
         console.log("GUGUToken deployed at:", address(token));
 
-        GUGUNFT nft = new GUGUNFT(initialOwner);
+        // GUGUNFT 先用部署者做临时 Owner（需要 addMinter 权限）
+        GUGUNFT nft = new GUGUNFT(msg.sender);
         console.log("GUGUNFT deployed at:", address(nft));
 
         NFTStaking staking = new NFTStaking(initialOwner, address(token), address(nft));
@@ -81,21 +82,20 @@ contract Deploy is Script {
         console.log("Airdrop deployed at:", address(airdrop));
 
         // =======================================
-        //          2. Configure Permissions
+        //          2. Configure NFT Minters
         // =======================================
 
-        // MysteryBox contract can mint NFTs
         nft.addMinter(address(mysteryBox));
         console.log("MysteryBox authorized as NFT minter");
 
-        // Airdrop contract can mint NFTs
         nft.addMinter(address(airdrop));
         console.log("Airdrop authorized as NFT minter");
 
-        // Note: Token minting and distribution should be done separately
-        // by the owner after deployment using token.mint()
-        //   - Add 30M to Uniswap/DEX liquidity pool
-        //   - Mystery Box consumption: users approve -> MysteryBox.buyBox() -> burn
+        // 转移 NFT 合约 Ownership 给 INITIAL_OWNER
+        if (initialOwner != msg.sender) {
+            nft.transferOwnership(initialOwner);
+            console.log("GUGUNFT ownership transferred to:", initialOwner);
+        }
 
         vm.stopBroadcast();
 
