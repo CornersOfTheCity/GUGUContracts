@@ -75,7 +75,10 @@ contract Deploy is Script {
         );
         console.log("MysteryBox deployed at:", address(mysteryBox));
 
-        TokenSwap tokenSwap = new TokenSwap(initialOwner);
+        // TokenSwap: set PAY_TOKEN (stablecoin address) and initial price
+        address payToken = vm.envAddress("PAY_TOKEN");
+        uint256 salePrice = vm.envOr("SALE_PRICE", uint256(0.1 * 1e18)); // default: 1 GUGU = 0.1 USDT
+        TokenSwap tokenSwap = new TokenSwap(address(token), payToken, salePrice, initialOwner);
         console.log("TokenSwap deployed at:", address(tokenSwap));
 
         Airdrop airdrop = new Airdrop(initialOwner, address(nft));
