@@ -8,6 +8,7 @@ import {NFTStaking} from "../src/NFTStaking.sol";
 import {MysteryBox} from "../src/MysteryBox.sol";
 import {TokenSwap} from "../src/TokenSwap.sol";
 import {Airdrop} from "../src/Airdrop.sol";
+import {TokenStaking} from "../src/TokenStaking.sol";
 
 /**
  * @title Deploy
@@ -75,14 +76,25 @@ contract Deploy is Script {
         );
         console.log("MysteryBox deployed at:", address(mysteryBox));
 
-        // TokenSwap: set PAY_TOKEN (stablecoin address) and initial price
+        // TokenSwap: deploy then add initial pay token
         address payToken = vm.envAddress("PAY_TOKEN");
-        uint256 salePrice = vm.envOr("SALE_PRICE", uint256(0.1 * 1e18)); // default: 1 GUGU = 0.1 USDT
-        TokenSwap tokenSwap = new TokenSwap(address(token), payToken, salePrice, initialOwner);
+        uint256 buyPrice = vm.envOr("SALE_PRICE", uint256(0.1 * 1e18));  // default: 1 GUGU = 0.1 USDT
+        uint256 sellPrice = vm.envOr("SELL_PRICE", uint256(0));          // default: no buyback price
+        TokenSwap tokenSwap = new TokenSwap(address(token), initialOwner);
+        tokenSwap.addPayToken(payToken, buyPrice, sellPrice);
         console.log("TokenSwap deployed at:", address(tokenSwap));
 
         Airdrop airdrop = new Airdrop(initialOwner, address(nft));
         console.log("Airdrop deployed at:", address(airdrop));
+
+        // TokenStaking: APR in basis points, lock duration in seconds
+        {
+            address _owner = initialOwner;
+            address _token = address(token);
+            uint256 stakingApr = vm.envOr("STAKING_APR_BPS", uint256(1000)); // default: 10%
+            uint256 stakingLock = vm.envOr("STAKING_LOCK_DURATION", uint256(7 days)); // default: 7 days
+            console.log("TokenStaking deployed at:", address(new TokenStaking(_token, stakingApr, stakingLock, _owner)));
+        }
 
         // =======================================
         //          2. Configure NFT Minters
@@ -120,7 +132,8 @@ contract Deploy is Script {
         console.log("  1. Add MysteryBox as VRF consumer in Chainlink subscription");
         console.log("  2. Add 30M GUGU + ETH to Uniswap liquidity pool");
         console.log("  3. Transfer 10M GUGU to MysteryBox or let users burn via buyBox");
-        console.log("  4. Update frontend contract addresses in contracts.js");
+        console.log("  4. Fund TokenStaking reward pool with GUGU tokens");
+        console.log("  5. Update frontend contract addresses in contracts.js");
         console.log("========================================");
     }
 }
